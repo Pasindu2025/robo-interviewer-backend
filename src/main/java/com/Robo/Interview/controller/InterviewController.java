@@ -12,10 +12,9 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/interview")
-@CrossOrigin(origins = "*") // 👈 මේක "*" කළාම ඕනෑම තැනක සිට (Netlify) වැඩ කරනවා
+@CrossOrigin(origins = "*")
 public class InterviewController {
 
-    // Railway එකේ අපි දාපු GROQ_API_KEY එක මෙතනින් කියවනවා
     private final String apiKey = System.getenv("GROQ_API_KEY");
     private final String url = "https://api.groq.com/openai/v1/chat/completions";
 
@@ -24,6 +23,7 @@ public class InterviewController {
 
         String prevQuestion = (String) request.get("question");
         String answer = (String) request.get("answer");
+        String category = (String) request.get("category"); // 👈 Frontend එකෙන් එන Category එක
 
         Object countObj = request.get("totalQuestions");
         int count = (countObj != null) ? Integer.parseInt(countObj.toString()) : 1;
@@ -31,27 +31,29 @@ public class InterviewController {
         RestTemplate restTemplate = new RestTemplate();
         Map<String, String> finalResponse = new HashMap<>();
 
-        // API Key එක නැත්නම් error එකක් පෙන්වන්න (Debugging සඳහා)
         if (apiKey == null || apiKey.isEmpty()) {
-            finalResponse.put("feedback", "Error: API Key is missing in Railway Variables!");
-            finalResponse.put("nextQuestion", "Please set GROQ_API_KEY in Railway dashboard.");
+            finalResponse.put("feedback", "Error: API Key is missing!");
+            finalResponse.put("nextQuestion", "Set GROQ_API_KEY in Railway.");
             return finalResponse;
         }
 
         try {
-            String systemInstruction = "You are a Senior Technical Lead conducting a natural, high-level technical interview. " +
-                    "CURRENT PROGRESS: Round " + count + " of 10. " +
-                    "THE CANDIDATE JUST ANSWERED: '" + answer + "' to your question: '" + prevQuestion + "'. " +
+            // AI එකට දෙන උපදෙස් මාලාව (Category එක අනුව)
+            String systemInstruction = "You are a Senior Technical Lead. Target Role: " + (category != null ? category : "Software Engineer") + ". " +
+                    "PROGRESS: Round " + count + " of 10. " +
+                    "THE CANDIDATE ANSWERED: '" + answer + "' to: '" + prevQuestion + "'. " +
+                    "INSTRUCTIONS: Provide brief feedback. If count < 10, ask the next technical question. " +
+                    "If count == 10, provide a final summary of their performance and a score out of 100. " +
                     "Return ONLY JSON: {\"feedback\":\"...\",\"nextQuestion\":\"...\"}";
 
             Map<String, Object> body = Map.of(
                     "model", "llama-3.3-70b-versatile",
                     "messages", List.of(
                             Map.of("role", "system", "content", systemInstruction),
-                            Map.of("role", "user", "content", "Feedback on my answer and ask the next question.")
+                            Map.of("role", "user", "content", "Evaluate answer and proceed.")
                     ),
                     "response_format", Map.of("type", "json_object"),
-                    "temperature", 0.8
+                    "temperature", 0.7
             );
 
             HttpHeaders headers = new HttpHeaders();
@@ -69,7 +71,8 @@ public class InterviewController {
             finalResponse.put("feedback", json.path("feedback").asText());
 
             if (count >= 10) {
-                finalResponse.put("nextQuestion", "Excellent! You've completed all 10 technical rounds.");
+                // රවුම් 10 ඉවර වුණාම feedback එක ඇතුළෙම score එක එනවා
+                finalResponse.put("nextQuestion", "Session Completed. Thank you!");
                 finalResponse.put("isFinished", "true");
             } else {
                 finalResponse.put("nextQuestion", json.path("nextQuestion").asText());
@@ -78,7 +81,7 @@ public class InterviewController {
 
         } catch (Exception e) {
             finalResponse.put("feedback", "Backend Error: " + e.getMessage());
-            finalResponse.put("nextQuestion", "Let's move on. Can you explain your experience with Git?");
+            finalResponse.put("nextQuestion", "Let's move on. Tell me more about your projects.");
             finalResponse.put("isFinished", "false");
         }
 
